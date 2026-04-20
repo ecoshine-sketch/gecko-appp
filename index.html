@@ -734,6 +734,133 @@ function parseShelfMonths(s){
   return m ? parseInt(m[1]) : 12;
 }
 
+// Markdown to HTML converter — full support for tables, blockquotes, headings, lists, inline formatting, horizontal rules
+function mdToHtml(md){
+  var lines = md.split('\n');
+  var out = [];
+  var i = 0;
+  while(i < lines.length){
+    var line = lines[i];
+    var trimmed = line.trim();
+
+    // Horizontal rule
+    if(trimmed.match(/^[-*_]{3,}$/)){
+      out.push('<hr>');
+      i++; continue;
+    }
+
+    // Headings
+    if(trimmed.match(/^#{1,6}\s/)){
+      var lvl = trimmed.match(/^(#{1,6})\s/)[1].length;
+      var htag = lvl <= 2 ? 'h3' : (lvl === 3 ? 'h4' : 'h5');
+      var htext = trimmed.replace(/^#{1,6}\s+/,'');
+      out.push('<'+htag+'>'+inlineFmt(htext)+'</'+htag+'>');
+      i++; continue;
+    }
+
+    // Table: collect all consecutive lines starting with |
+    if(trimmed.startsWith('|')){
+      var tableLines = [];
+      while(i < lines.length && lines[i].trim().startsWith('|')){
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      out.push(parseTableToHtml(tableLines));
+      continue;
+    }
+
+    // Blockquote: collect consecutive > lines
+    if(trimmed.startsWith('>')){
+      var bqLines = [];
+      while(i < lines.length && lines[i].trim().startsWith('>')){
+        bqLines.push(lines[i].trim().replace(/^>\s?/,''));
+        i++;
+      }
+      out.push('<blockquote style="border-left:3px solid var(--gold);padding:8px 12px;margin:8px 0;background:rgba(198,165,110,0.08);font-size:12px;color:var(--text-light);border-radius:4px">'+inlineFmt(bqLines.join(' '))+'</blockquote>');
+      continue;
+    }
+
+    // Unordered list
+    if(trimmed.match(/^[-•*]\s+/)){
+      var listItems = [];
+      while(i < lines.length && lines[i].trim().match(/^[-•*]\s+/)){
+        listItems.push(lines[i].trim().replace(/^[-•*]\s+/,''));
+        i++;
+      }
+      out.push('<ul style="margin:6px 0;padding-left:20px">'+listItems.map(function(li){return '<li style="margin:2px 0;font-size:13px">'+inlineFmt(li)+'</li>'}).join('')+'</ul>');
+      continue;
+    }
+
+    // Ordered list
+    if(trimmed.match(/^\d+\.\s+/)){
+      var olItems = [];
+      while(i < lines.length && lines[i].trim().match(/^\d+\.\s+/)){
+        olItems.push(lines[i].trim().replace(/^\d+\.\s+/,''));
+        i++;
+      }
+      out.push('<ol style="margin:6px 0;padding-left:20px">'+olItems.map(function(li){return '<li style="margin:2px 0;font-size:13px">'+inlineFmt(li)+'</li>'}).join('')+'</ol>');
+      continue;
+    }
+
+    // Empty line = paragraph break
+    if(trimmed === ''){
+      i++; continue;
+    }
+
+    // Regular paragraph
+    out.push('<p style="margin:6px 0;font-size:13px">'+inlineFmt(trimmed)+'</p>');
+    i++;
+  }
+  return out.join('\n');
+}
+
+// Inline formatting: bold, italic, code, links
+function inlineFmt(text){
+  return text
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/`(.+?)`/g,'<code style="background:var(--bg-elevated);padding:1px 4px;border-radius:3px;font-size:12px">$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" style="color:var(--gold)">$1</a>');
+}
+
+// Convert markdown table lines to an HTML table
+function parseTableToHtml(tableLines){
+  if(tableLines.length < 2) return tableLines.join('<br>');
+  // Parse cells from a line
+  function getCells(line){
+    return line.split('|').map(function(c){return c.trim()}).filter(function(c){return c !== ''});
+  }
+  // Detect separator line (the --- row)
+  var sepIdx = -1;
+  for(var s=0;s<tableLines.length;s++){
+    if(tableLines[s].match(/^\|[\s-:|]+\|$/)){sepIdx=s;break}
+  }
+  var headerCells = getCells(tableLines[0]);
+  var dataStart = sepIdx >= 0 ? sepIdx + 1 : 1;
+
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0">';
+  // Header
+  html += '<thead><tr>';
+  headerCells.forEach(function(h){
+    html += '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--border);font-weight:600;color:var(--text);background:var(--bg-elevated)">'+inlineFmt(h)+'</th>';
+  });
+  html += '</tr></thead>';
+  // Body
+  html += '<tbody>';
+  for(var r=dataStart;r<tableLines.length;r++){
+    if(tableLines[r].match(/^\|[\s-:|]+\|$/)) continue; // skip extra separator lines
+    var cells = getCells(tableLines[r]);
+    html += '<tr>';
+    cells.forEach(function(c,ci){
+      var style = 'padding:5px 8px;border-bottom:1px solid var(--border-light);color:var(--text-light)';
+      html += '<td style="'+style+'">'+inlineFmt(c)+'</td>';
+    });
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
 // Markdown parser (for recipe import)
 function parseMarkdownRecipe(md){
   var recipe = {id:uid(),name:'',phases:[],scentProfiles:[],sections:[],batchSize:100,format:'',shelfLife:'12 months',ifraCategory:'',category:'',productLine:'',targetRRP:'',totalIngredients:0,qcItems:[]};
@@ -873,7 +1000,7 @@ function parseMarkdownRecipe(md){
         var tRows = sBody.match(/\|\s*(.+?)\s*\|\s*([\d.]+)\s*g?\s*\|/g) || [];
         tRows.forEach(function(tr){
           var tp = tr.match(/\|\s*(.+?)\s*\|\s*([\d.]+)/);
-          if(tp && !tp[1].includes('---') && !tp[1].toLowerCase().includes('oil') && !tp[1].toLowerCase().includes('ingredient')) oils.push({name:tp[1].trim(),grams:parseFloat(tp[2])});
+          if(tp && !tp[1].includes('---') && !tp[1].toLowerCase().includes('ingredient') && !tp[1].toLowerCase().includes('grams') && !tp[1].toLowerCase().includes('notes')) oils.push({name:tp[1].trim(),grams:parseFloat(tp[2])});
         });
       }
       var totalOils = oils.reduce(function(s,o){return s+o.grams},0);
@@ -909,13 +1036,8 @@ function parseMarkdownRecipe(md){
   secPositions.forEach(function(sp, i){
     var end = i < secPositions.length-1 ? secPositions[i+1].start : md.length;
     var body = md.substring(sp.start, end);
-    // Simple markdown to HTML
-    var html = body.replace(/^### (.+)/gm,'<h3>$1</h3>')
-      .replace(/^## (.+)/gm,'<h3>$1</h3>')
-      .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g,'<em>$1</em>')
-      .replace(/^[-•]\s+(.+)/gm,'<li>$1</li>')
-      .replace(/\n\n/g,'<br><br>');
+    // Markdown to HTML — handles tables, blockquotes, headings, lists, inline formatting
+    var html = mdToHtml(body);
     var cat = 'other';
     var tl = sp.title.toLowerCase();
     if(tl.includes('phase')) cat = 'phase';
