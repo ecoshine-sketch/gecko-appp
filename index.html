@@ -341,9 +341,11 @@ function uid(){return Math.random().toString(36).substr(2,9)}
 function ls(k,d){try{var v=localStorage.getItem('gecko_'+k);return v?JSON.parse(v):d}catch(e){return d}}
 function lsSet(k,v){try{localStorage.setItem('gecko_'+k,JSON.stringify(v))}catch(e){} if(typeof scheduleSyncPush==='function'&&k!=='syncConfig'&&k!=='lastSyncTime'&&k!=='deviceId'&&k!=='syncStatus') scheduleSyncPush();}
 
+function getAllRecipes(){var del=ls('deletedRecipes',[]);return RECIPES.filter(function(r){return del.indexOf(r.id)===-1}).concat(ls('userRecipes',[]))}
+
 // ── Cloud Sync (GitHub Gist) ──
 var SYNC_DEBOUNCE=null;
-var SYNC_KEYS=['batchLogs','userRecipes','profiles','activeProfile','workshopMode','defaultOverage','giftBundles','scheduledBatches','ingredientData','lastBackupDate','activityFeed','userPresence'];
+var SYNC_KEYS=['batchLogs','userRecipes','deletedRecipes','profiles','activeProfile','workshopMode','defaultOverage','giftBundles','scheduledBatches','ingredientData','lastBackupDate','activityFeed','userPresence'];
 
 function getSyncableData(){
   var data={};
@@ -631,6 +633,67 @@ function genBatchNum(recipeName){
   return code + '-' + ds + '-' + seq;
 }
 
+// Code128B barcode SVG generator
+function genBarcodeSVG(text, w, h){
+  w = w || 200; h = h || 50;
+  var CODE128B = [
+    [2,1,2,2,2,2],[2,2,2,1,2,2],[2,2,2,2,2,1],[1,2,1,2,2,3],[1,2,1,3,2,2],
+    [1,3,1,2,2,2],[1,2,2,2,1,3],[1,2,2,3,1,2],[1,3,2,2,1,2],[2,2,1,2,1,3],
+    [2,2,1,3,1,2],[2,3,1,2,1,2],[1,1,2,2,3,2],[1,2,2,1,3,2],[1,2,2,2,3,1],
+    [1,1,3,2,2,2],[1,2,3,1,2,2],[1,2,3,2,2,1],[2,2,3,2,1,1],[2,2,1,1,3,2],
+    [2,2,1,2,3,1],[2,1,3,2,1,2],[2,2,3,1,1,2],[3,1,2,1,3,1],[3,1,1,2,2,2],
+    [3,2,1,1,2,2],[3,2,1,2,2,1],[3,1,2,2,1,2],[3,2,2,1,1,2],[3,2,2,2,1,1],
+    [2,1,2,1,2,3],[2,1,2,3,2,1],[2,3,2,1,2,1],[1,1,1,3,2,3],[1,3,1,1,2,3],
+    [1,3,1,3,2,1],[1,1,2,3,1,3],[1,3,2,1,1,3],[1,3,2,3,1,1],[2,1,1,3,1,3],
+    [2,3,1,1,1,3],[2,3,1,3,1,1],[1,1,2,1,3,3],[1,1,2,3,3,1],[1,3,2,1,3,1],
+    [1,1,3,1,2,3],[1,1,3,3,2,1],[1,3,3,1,2,1],[3,1,3,1,2,1],[2,1,1,3,3,1],
+    [2,3,1,1,3,1],[2,1,3,1,1,3],[2,1,3,3,1,1],[2,1,3,1,3,1],[3,1,1,1,2,3],
+    [3,1,1,3,2,1],[3,3,1,1,2,1],[3,1,2,1,1,3],[3,1,2,3,1,1],[3,3,2,1,1,1],
+    [3,1,4,1,1,1],[2,2,1,4,1,1],[4,3,1,1,1,1],[1,1,1,2,2,4],[1,1,1,4,2,2],
+    [1,2,1,1,2,4],[1,2,1,4,2,1],[1,4,1,1,2,2],[1,4,1,2,2,1],[1,1,2,2,1,4],
+    [1,1,2,4,1,2],[1,2,2,1,1,4],[1,2,2,4,1,1],[1,4,2,1,1,2],[1,4,2,2,1,1],
+    [2,4,1,2,1,1],[2,2,1,1,1,4],[4,1,3,1,1,1],[2,4,1,1,1,2],[1,3,4,1,1,1],
+    [1,1,1,2,4,2],[1,2,1,1,4,2],[1,2,1,2,4,1],[1,1,4,2,1,2],[1,2,4,1,1,2],
+    [1,2,4,2,1,1],[4,1,1,2,1,2],[4,2,1,1,1,2],[4,2,1,2,1,1],[2,1,2,1,4,1],
+    [2,1,4,1,2,1],[4,1,2,1,2,1],[1,1,1,1,4,3],[1,1,1,3,4,1],[1,3,1,1,4,1],
+    [1,1,4,1,1,3],[1,1,4,3,1,1],[4,1,1,1,1,3],[4,1,1,3,1,1],[1,1,3,1,4,1],
+    [1,1,4,1,3,1],[3,1,1,1,4,1],[4,1,1,1,3,1],[2,1,1,4,1,2],[2,1,1,2,1,4],
+    [2,1,1,2,3,2],[2,3,3,1,1,1,2]
+  ];
+  var startB = 104;
+  var codes = [startB];
+  var checksum = startB;
+  for(var i=0;i<text.length;i++){
+    var val = text.charCodeAt(i) - 32;
+    if(val < 0 || val > 94) val = 0;
+    codes.push(val);
+    checksum += val * (i+1);
+  }
+  codes.push(checksum % 103);
+  codes.push(106); // stop
+
+  var bars = [];
+  codes.forEach(function(c){
+    var pat = CODE128B[c];
+    if(!pat) return;
+    for(var j=0;j<pat.length;j++){
+      bars.push({w:pat[j], black:j%2===0});
+    }
+  });
+
+  var totalUnits = bars.reduce(function(s,b){return s+b.w},0);
+  var unitW = w / totalUnits;
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">';
+  var x = 0;
+  bars.forEach(function(b){
+    var bw = b.w * unitW;
+    if(b.black) svg += '<rect x="'+x.toFixed(2)+'" y="0" width="'+bw.toFixed(2)+'" height="'+h+'" fill="#000"/>';
+    x += bw;
+  });
+  svg += '</svg>';
+  return 'data:image/svg+xml;base64,' + btoa(svg);
+}
+
 // Parse shelf life to months
 function parseShelfMonths(s){
   if(!s) return 12;
@@ -640,65 +703,144 @@ function parseShelfMonths(s){
 
 // Markdown parser (for recipe import)
 function parseMarkdownRecipe(md){
-  var recipe = {id:uid(),name:'',phases:[],scentProfiles:[],sections:[],batchSize:100,format:'',shelfLife:'12 months',ifraCategory:'',category:'',targetRRP:'',totalIngredients:0,qcItems:[]};
+  var recipe = {id:uid(),name:'',phases:[],scentProfiles:[],sections:[],batchSize:100,format:'',shelfLife:'12 months',ifraCategory:'',category:'',productLine:'',targetRRP:'',totalIngredients:0,qcItems:[]};
 
-  // Extract name
+  // Extract name from first H1
   var nameMatch = md.match(/^#\s+(.+)/m);
-  if(nameMatch) recipe.name = nameMatch[1].trim();
+  if(nameMatch) recipe.name = nameMatch[1].trim().replace(/\s*[—–-]\s*V[\d.]+$/,'');
 
-  // Extract phases with ingredient tables
-  var phaseRegex = /##\s+(?:PHASE\s+([A-D])|Phase\s+(\d+))\s*[—–-]?\s*(.*?)(?=\n)/gi;
-  var pm;
-  while((pm = phaseRegex.exec(md)) !== null){
-    var pLetter = pm[1] || String.fromCharCode(64+parseInt(pm[2]));
-    var pName = pm[3] || '';
-    var pStart = pm.index;
-    // Find ingredient table after this
-    var remaining = md.substring(pStart);
-    var tableMatch = remaining.match(/\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|([\s\S]*?)(?=\n##|\n\*\*Phase|$)/);
-    var ingredients = [];
-    if(tableMatch){
-      var rows = tableMatch[1].split('\n').filter(function(r){return r.trim().startsWith('|') && !r.includes('---')});
-      var num = 1;
-      rows.forEach(function(row){
-        var cells = row.split('|').map(function(c){return c.trim()}).filter(Boolean);
-        if(cells.length >= 4){
-          var g = parseFloat(cells[2]);
-          var p = parseFloat(cells[3]);
-          if(!isNaN(g)){
-            ingredients.push({id:uid(),number:num++,name:cells[1]||cells[0],grams:g,percent:isNaN(p)?g:p,function:cells[4]||''});
-          }
-        }
-      });
-    }
-    var totalG = ingredients.reduce(function(s,i){return s+i.grams},0);
-    var totalP = ingredients.reduce(function(s,i){return s+i.percent},0);
-    recipe.phases.push({id:uid(),name:pName,letter:pLetter,temperature:'',ingredients:ingredients,totalGrams:totalG,totalPercent:totalP});
+  // Extract metadata from subtitle line (line after H1)
+  var metaLine = md.match(/^#\s+.+\n+(.+)/m);
+  if(metaLine){
+    var ml = metaLine[1];
+    var bsMatch = ml.match(/(\d+)\s*g\s*(?:master\s*)?batch/i);
+    if(bsMatch) recipe.batchSize = parseInt(bsMatch[1]);
+    if(/poured|tin|jar/i.test(ml)) recipe.format = 'Poured (tin/jar)';
+    else if(/tube/i.test(ml)) recipe.format = 'Tube';
+    else if(/(?<!un)whipped/i.test(ml)) recipe.format = 'Whipped (jar)';
+    else if(/pump|bottle/i.test(ml)) recipe.format = 'Pump bottle';
+    else if(/stick|twist/i.test(ml)) recipe.format = 'Stick/twist-up';
+    else if(/bar/i.test(ml)) recipe.format = 'Solid bar';
+    var shelfMatch = ml.match(/(\d+)\s*months?\s*shelf/i) || md.match(/shelf\s*life[:\s]*(\d+)\s*months/i);
+    if(shelfMatch) recipe.shelfLife = shelfMatch[1]+' months';
+    if(/cat\s*5a/i.test(ml)) recipe.ifraCategory = 'Cat 5A — Body lotion, body cream';
+    else if(/cat\s*4/i.test(ml)) recipe.ifraCategory = 'Cat 4 — Fine fragrance';
   }
+
+  // Helper: parse a table into rows of cells, auto-detect column layout
+  function parseTable(tableText){
+    var lines = tableText.split('\n').filter(function(r){
+      var t = r.trim();
+      return t.startsWith('|') && !t.match(/^\|[\s-:|]+\|$/);
+    });
+    if(lines.length === 0) return [];
+    // Detect header row to find column mapping
+    var headerLine = lines[0];
+    var headerCells = headerLine.split('|').map(function(c){return c.trim()}).filter(Boolean);
+    // Find which column index is the name, grams, percent
+    var nameCol = -1, gramsCol = -1, pctCol = -1, numCol = -1;
+    headerCells.forEach(function(h,i){
+      var hl = h.toLowerCase();
+      if(hl === '#' || hl === 'no' || hl === 'no.') numCol = i;
+      else if(hl.includes('ingredient') || hl.includes('name') || hl.includes('component') || hl.includes('item')) nameCol = i;
+      else if(hl.includes('gram') || hl === 'g' || hl.includes('weight')) gramsCol = i;
+      else if(hl === '%' || hl.includes('% w/w') || hl.includes('percent')) pctCol = i;
+    });
+    // Fallback: if no header detected, guess from column count
+    if(nameCol === -1){
+      if(headerCells.length >= 5){ nameCol=1;gramsCol=2;pctCol=3; }
+      else if(headerCells.length >= 3){ nameCol=0;gramsCol=1;pctCol=2; }
+    }
+    if(gramsCol === -1) gramsCol = nameCol + 1;
+    if(pctCol === -1) pctCol = gramsCol + 1;
+    // Parse data rows (skip header)
+    var dataRows = lines.slice(1);
+    var results = [];
+    dataRows.forEach(function(row){
+      var cells = row.split('|').map(function(c){return c.trim()}).filter(Boolean);
+      if(cells.length < 2) return;
+      var rawName = cells[nameCol] || '';
+      var rawGrams = cells[gramsCol] || '';
+      var rawPct = cells[pctCol] || '';
+      // Strip units: "72.0g" -> "72.0", "72.0%" -> "72.0"
+      var g = parseFloat(rawGrams.replace(/[g%\s]/gi,''));
+      var p = parseFloat(rawPct.replace(/[g%\s]/gi,''));
+      // Clean ingredient name — strip parenthetical specs like "(specify carrier on batch card)"
+      var cleanName = rawName.replace(/\s*\(specify[^)]*\)/gi,'').trim();
+      if(cleanName && !isNaN(g)){
+        results.push({name:cleanName, grams:g, percent:isNaN(p)?g:p});
+      }
+    });
+    return results;
+  }
+
+  // Extract phases — flexible regex handles pipes, colons, dashes in headers
+  // Matches: "## PHASE A — Name | Temp | Weight", "## Phase 1: Name", "## PHASE B — Name" etc.
+  var phaseRegex = /^##\s+PHASE\s+([A-Z]|\d+)\s*[—–:\-|]?\s*([^\n]*)/gim;
+  var pm;
+  var phasePositions = [];
+  while((pm = phaseRegex.exec(md)) !== null){
+    var rawLetter = pm[1];
+    var pLetter = rawLetter.length === 1 && rawLetter.match(/[A-Z]/i) ? rawLetter.toUpperCase() : String.fromCharCode(64+parseInt(rawLetter));
+    var pHeaderRest = pm[2] || '';
+    // Extract phase name (first segment before | or end)
+    var pNameParts = pHeaderRest.split('|');
+    var pName = pNameParts[0].replace(/^[—–:\-\s]+/,'').trim();
+    // Extract temperature hint from header
+    var tempHint = '';
+    var tempMatch = pHeaderRest.match(/(\d+)\s*[–-]\s*(\d+)\s*°C/);
+    if(tempMatch) tempHint = tempMatch[1]+'–'+tempMatch[2]+'°C';
+    phasePositions.push({letter:pLetter, name:pName, temp:tempHint, start:pm.index});
+  }
+
+  // For each phase, find the table between this phase header and the next section
+  phasePositions.forEach(function(pp, i){
+    var endPos = i < phasePositions.length-1 ? phasePositions[i+1].start : md.length;
+    // Also stop at next ## that isn't a phase
+    var nextSection = md.substring(pp.start+1).match(/\n##\s+(?!PHASE)/i);
+    if(nextSection) endPos = Math.min(endPos, pp.start+1+nextSection.index);
+    var block = md.substring(pp.start, endPos);
+    // Skip the header line before looking for table pipes
+    var firstNewline = block.indexOf('\n');
+    var blockAfterHeader = firstNewline > -1 ? block.substring(firstNewline+1) : block;
+    var tableStart = blockAfterHeader.indexOf('|');
+    if(tableStart === -1){ recipe.phases.push({id:uid(),name:pp.name,letter:pp.letter,temperature:pp.temp,ingredients:[],totalGrams:0,totalPercent:0}); return; }
+    var tableText = blockAfterHeader.substring(tableStart);
+    var parsed = parseTable(tableText);
+    var ingredients = [];
+    var num = 1;
+    parsed.forEach(function(row){
+      ingredients.push({id:uid(),number:num++,name:row.name,grams:row.grams,percent:row.percent,function:''});
+    });
+    var totalG = ingredients.reduce(function(s,ing){return s+ing.grams},0);
+    var totalP = ingredients.reduce(function(s,ing){return s+ing.percent},0);
+    recipe.phases.push({id:uid(),name:pp.name,letter:pp.letter,temperature:pp.temp,ingredients:ingredients,totalGrams:totalG,totalPercent:totalP});
+  });
 
   recipe.totalIngredients = recipe.phases.reduce(function(s,p){return s+p.ingredients.length},0);
 
   // Extract scent profiles
-  var scentMatch = md.match(/##\s+SCENT PROFILES([\s\S]*?)(?=\n## [^S]|\n## $|$)/i);
+  var scentMatch = md.match(/##\s+SCENT PROFILES?([\s\S]*?)(?=\n##\s+(?!###)|$)/i);
   if(scentMatch){
     var scentBlock = scentMatch[1];
-    var optRegex = /###\s+(?:Option\s+\d+\s*[—–-]?\s*)?(.+?)(?:\n)([\s\S]*?)(?=\n### Option|\n## |$)/gi;
+    var optRegex = /###\s+(?:Option\s+\d+\s*[—–:\-]?\s*)?(.+?)(?:\n)([\s\S]*?)(?=\n###\s|\n##\s|$)/gi;
     var om;
     while((om = optRegex.exec(scentBlock)) !== null){
       var sName = om[1].trim();
       var sBody = om[2];
       var oils = [];
-      var oilRows = sBody.match(/[-•]\s*(.+?):\s*([\d.]+)\s*g/g) || [];
+      // Try bullet format: "- Lavender EO: 0.8g"
+      var oilRows = sBody.match(/[-•*]\s*(.+?):\s*([\d.]+)\s*g/g) || [];
       oilRows.forEach(function(or){
-        var parts = or.match(/[-•]\s*(.+?):\s*([\d.]+)/);
+        var parts = or.match(/[-•*]\s*(.+?):\s*([\d.]+)/);
         if(parts) oils.push({name:parts[1].trim(),grams:parseFloat(parts[2])});
       });
-      // Also try table format
+      // Try table format
       if(oils.length === 0){
-        var tRows = sBody.match(/\|\s*(.+?)\s*\|\s*([\d.]+)\s*\|/g) || [];
+        var tRows = sBody.match(/\|\s*(.+?)\s*\|\s*([\d.]+)\s*g?\s*\|/g) || [];
         tRows.forEach(function(tr){
           var tp = tr.match(/\|\s*(.+?)\s*\|\s*([\d.]+)/);
-          if(tp && !tp[1].includes('---') && !tp[1].toLowerCase().includes('oil')) oils.push({name:tp[1].trim(),grams:parseFloat(tp[2])});
+          if(tp && !tp[1].includes('---') && !tp[1].toLowerCase().includes('oil') && !tp[1].toLowerCase().includes('ingredient')) oils.push({name:tp[1].trim(),grams:parseFloat(tp[2])});
         });
       }
       var totalOils = oils.reduce(function(s,o){return s+o.grams},0);
@@ -708,24 +850,28 @@ function parseMarkdownRecipe(md){
   }
 
   // Extract QC items
-  var qcMatch = md.match(/##\s+QC CHECKLIST([\s\S]*?)(?=\n## |$)/i);
+  var qcMatch = md.match(/##\s+QC CHECKLIST([\s\S]*?)(?=\n##\s|$)/i);
   if(qcMatch){
     var qcBlock = qcMatch[1];
-    var qcRows = qcBlock.match(/\|\s*(.+?)\s*\|/g) || [];
-    qcRows.forEach(function(r){
-      var cell = r.replace(/^\||\|$/g,'').trim();
-      if(cell && !cell.includes('---') && cell.toLowerCase() !== 'check' && cell.toLowerCase() !== 'method' && cell.toLowerCase() !== 'pass criteria'){
-        recipe.qcItems.push(cell);
+    var qcLines = qcBlock.split('\n');
+    qcLines.forEach(function(line){
+      var t = line.trim();
+      if(!t || t.match(/^\|[\s-:|]+\|$/) || t.toLowerCase().includes('check') && t.toLowerCase().includes('method')) return;
+      if(t.startsWith('|')){
+        var cells = t.split('|').map(function(c){return c.trim()}).filter(Boolean);
+        if(cells.length >= 1 && cells[0] && !cells[0].includes('---')){
+          recipe.qcItems.push(cells[0]);
+        }
       }
     });
   }
 
   // Build sections from remaining markdown
   var secRegex = /^##\s+(.+)/gm;
-  var secMatch;
+  var secMatchR;
   var secPositions = [];
-  while((secMatch = secRegex.exec(md)) !== null){
-    secPositions.push({title:secMatch[1].trim(), start:secMatch.index});
+  while((secMatchR = secRegex.exec(md)) !== null){
+    secPositions.push({title:secMatchR[1].trim(), start:secMatchR.index});
   }
   secPositions.forEach(function(sp, i){
     var end = i < secPositions.length-1 ? secPositions[i+1].start : md.length;
@@ -740,7 +886,8 @@ function parseMarkdownRecipe(md){
     var cat = 'other';
     var tl = sp.title.toLowerCase();
     if(tl.includes('phase')) cat = 'phase';
-    else if(tl.includes('safety') || tl.includes('regulatory') || tl.includes('notice')) cat = 'regulatory';
+    else if(tl.includes('batch total')) cat = 'phase';
+    else if(tl.includes('safety') || tl.includes('regulatory') || tl.includes('notice') || tl.includes('warning')) cat = 'regulatory';
     else if(tl.includes('production') || tl.includes('protocol') || tl.includes('method')) cat = 'production';
     else if(tl.includes('qc') || tl.includes('checklist')) cat = 'qc';
     else if(tl.includes('scent')) cat = 'scent_profiles';
@@ -767,6 +914,12 @@ function parseMarkdownRecipe(md){
   else if(nm.includes('soap')) recipe.category = 'Soap';
   else if(nm.includes('baby') || nm.includes('little')) recipe.category = 'Baby';
   else recipe.category = 'Skincare';
+
+  // Detect product line from positioning or name
+  if(/budget|everyday|gateway/i.test(md.substring(0,2000))) recipe.productLine = 'Gecko Everyday';
+  else if(/premium|clinical|recovery|gold/i.test(nm)) recipe.productLine = 'Gecko Gold';
+  else if(/little|baby|nappy/i.test(nm)) recipe.productLine = 'Little Geckos';
+  else if(/beard|clay|men/i.test(nm)) recipe.productLine = "Gecko Men's";
 
   if(recipe.qcItems.length === 0){
     recipe.qcItems = ['All ingredients weighed accurately','Temperatures monitored','Visual inspection passed','Product fills correct','Batch labelled','Equipment cleaned'];
@@ -1149,9 +1302,8 @@ function RecipeList(props){
 
   var lines = ['All'].concat(PRODUCT_LINES);
 
-  // Include user-added recipes
-  var userRecipes = ls('userRecipes',[]);
-  var allRecipes = RECIPES.concat(userRecipes);
+  // Include user-added recipes (excluding deleted)
+  var allRecipes = getAllRecipes();
 
   var filtered = allRecipes.filter(function(r){
     var matchSearch = !search || r.name.toLowerCase().indexOf(search.toLowerCase()) >= 0;
@@ -1231,11 +1383,14 @@ function RecipeDetail(props){
 
   var initialPhases = latestVersion ? latestVersion.phases : JSON.parse(JSON.stringify(originalRecipe.phases));
   var initialName = latestVersion ? latestVersion.name : originalRecipe.name;
+  var initialSections = latestVersion && latestVersion.sections ? JSON.parse(JSON.stringify(latestVersion.sections)) : JSON.parse(JSON.stringify(originalRecipe.sections||[]));
 
   var ps = useState(initialPhases);
   var phases = ps[0], setPhases = ps[1];
   var ns = useState(initialName);
   var recipeName = ns[0], setRecipeName = ns[1];
+  var ss2 = useState(initialSections);
+  var sections = ss2[0], setSections = ss2[1];
 
   var showCalc = useState(false);
   var calcOpen = showCalc[0], setCalcOpen = showCalc[1];
@@ -1248,7 +1403,7 @@ function RecipeDetail(props){
   var hasEdits = allVersions.length > 0;
 
   // Build a working recipe object that uses current state
-  var recipe = Object.assign({}, originalRecipe, {phases: phases, name: recipeName});
+  var recipe = Object.assign({}, originalRecipe, {phases: phases, name: recipeName, sections: sections});
 
   function saveEdits(){
     var noteText = prompt('Version note (what changed?):','');
@@ -1259,13 +1414,14 @@ function RecipeDetail(props){
       versionNumber: vNum,
       name: recipeName,
       phases: JSON.parse(JSON.stringify(phases)),
+      sections: JSON.parse(JSON.stringify(sections)),
       savedAt: new Date().toISOString(),
       author: ls('activeProfile','Heath'),
       changeNotes: noteText || ''
     });
     lsSet(versionsKey, versions);
     // Also keep legacy key for compatibility
-    lsSet('recipeEdits_'+originalRecipe.id, {phases: phases, name: recipeName, savedAt: new Date().toISOString()});
+    lsSet('recipeEdits_'+originalRecipe.id, {phases: phases, sections: sections, name: recipeName, savedAt: new Date().toISOString()});
     showToast('Saved as '+vNum);logActivity('edited recipe',originalRecipe.name+' → '+vNum);
     setEditing(false);
   }
@@ -1275,13 +1431,15 @@ function RecipeDetail(props){
       // Rollback to original
       if(!confirm('Revert to the original recipe? This creates a new version.')) return;
       var orig = JSON.parse(JSON.stringify(originalRecipe.phases));
+      var origSec = JSON.parse(JSON.stringify(originalRecipe.sections||[]));
       setPhases(orig);
+      setSections(origSec);
       setRecipeName(originalRecipe.name);
       // Save as new version
       var versions = ls(versionsKey, []);
-      versions.push({versionId:uid(),versionNumber:'V'+(versions.length+1)+'.0',name:originalRecipe.name,phases:orig,savedAt:new Date().toISOString(),author:ls('activeProfile','Heath'),changeNotes:'Rolled back to original'});
+      versions.push({versionId:uid(),versionNumber:'V'+(versions.length+1)+'.0',name:originalRecipe.name,phases:orig,sections:origSec,savedAt:new Date().toISOString(),author:ls('activeProfile','Heath'),changeNotes:'Rolled back to original'});
       lsSet(versionsKey, versions);
-      lsSet('recipeEdits_'+originalRecipe.id, {phases:orig,name:originalRecipe.name,savedAt:new Date().toISOString()});
+      lsSet('recipeEdits_'+originalRecipe.id, {phases:orig,sections:origSec,name:originalRecipe.name,savedAt:new Date().toISOString()});
       showToast('Rolled back to original');
     } else {
       var versions = ls(versionsKey, []);
@@ -1289,11 +1447,13 @@ function RecipeDetail(props){
       if(!v) return;
       if(!confirm('Roll back to '+v.versionNumber+'? This creates a new version.')) return;
       var restoredPhases = JSON.parse(JSON.stringify(v.phases));
+      var restoredSections = v.sections ? JSON.parse(JSON.stringify(v.sections)) : JSON.parse(JSON.stringify(originalRecipe.sections||[]));
       setPhases(restoredPhases);
+      setSections(restoredSections);
       setRecipeName(v.name);
-      versions.push({versionId:uid(),versionNumber:'V'+(versions.length+1)+'.0',name:v.name,phases:restoredPhases,savedAt:new Date().toISOString(),author:ls('activeProfile','Heath'),changeNotes:'Rolled back to '+v.versionNumber});
+      versions.push({versionId:uid(),versionNumber:'V'+(versions.length+1)+'.0',name:v.name,phases:restoredPhases,sections:restoredSections,savedAt:new Date().toISOString(),author:ls('activeProfile','Heath'),changeNotes:'Rolled back to '+v.versionNumber});
       lsSet(versionsKey, versions);
-      lsSet('recipeEdits_'+originalRecipe.id, {phases:restoredPhases,name:v.name,savedAt:new Date().toISOString()});
+      lsSet('recipeEdits_'+originalRecipe.id, {phases:restoredPhases,sections:restoredSections,name:v.name,savedAt:new Date().toISOString()});
       showToast('Rolled back to '+v.versionNumber);
     }
     setEditing(false);
@@ -1363,7 +1523,8 @@ function RecipeDetail(props){
       totalCost:0,
       status:'completed',
       author:ls('activeProfile','Heath'),
-      expiryDate:addMonths(today(), parseShelfMonths(recipe.shelfLife))
+      expiryDate:addMonths(today(), parseShelfMonths(recipe.shelfLife)),
+      barcode:genBarcodeSVG(num, 220, 50)
     };
     props.onLogBatch(batch);
   }
@@ -1376,6 +1537,49 @@ function RecipeDetail(props){
       text += body + '\n\n';
     });
     doCopy(text);
+  }
+
+  // Section editing functions
+  var _editingSec = useState(null);
+  var editingSectionIdx = _editingSec[0], setEditingSectionIdx = _editingSec[1];
+
+  function moveSectionToProduction(secIdx){
+    var newSecs = JSON.parse(JSON.stringify(sections));
+    newSecs[secIdx].category = 'production';
+    setSections(newSecs);
+    showToast('Moved to production method');
+  }
+
+  function moveSectionFromProduction(secIdx){
+    var newSecs = JSON.parse(JSON.stringify(sections));
+    newSecs[secIdx].category = 'info';
+    setSections(newSecs);
+    showToast('Moved to More Details');
+  }
+
+  function renameSection(secIdx){
+    var sec = sections[secIdx];
+    var newTitle = prompt('Rename section:', sec.title);
+    if(!newTitle || newTitle === sec.title) return;
+    var newSecs = JSON.parse(JSON.stringify(sections));
+    newSecs[secIdx].title = newTitle;
+    setSections(newSecs);
+    showToast('Section renamed');
+  }
+
+  function editSectionContent(secIdx, newHtml){
+    var newSecs = JSON.parse(JSON.stringify(sections));
+    newSecs[secIdx].html = newHtml;
+    setSections(newSecs);
+  }
+
+  function deleteSection(secIdx){
+    var sec = sections[secIdx];
+    if(!confirm('Delete section "'+sec.title+'"?')) return;
+    var newSecs = JSON.parse(JSON.stringify(sections));
+    newSecs.splice(secIdx, 1);
+    setSections(newSecs);
+    showToast('Section deleted');
   }
 
   function addPhase(){
@@ -1427,6 +1631,7 @@ function RecipeDetail(props){
         e('button',{className:'tool-btn',onClick:function(){setCalcOpen(!calcOpen)}},'\uD83E\uDDEE Scale'),
         e('button',{className:'tool-btn',onClick:startBatch},'\uD83D\uDCE6 Log Batch'),
         e('button',{className:'tool-btn',onClick:exportRecipeMD},'\uD83D\uDCCB Export'),
+        e('button',{className:'tool-btn',style:{color:'#e74c3c'},onClick:function(){props.onDelete(originalRecipe)}},'\uD83D\uDDD1 Delete'),
         !editing ? e('button',{className:'tool-btn',onClick:function(){setEditing(true)}},'\u270F Edit') :
         e('span',{style:{display:'flex',gap:'6px'}},
           e('button',{className:'tool-btn primary',onClick:saveEdits},'\u2713 Save'),
@@ -1562,10 +1767,21 @@ function RecipeDetail(props){
 
 
     // Production method sections (shown by default)
-    recipe.sections.filter(function(sec){return sec.category==='production'}).map(function(sec, si){
+    recipe.sections.map(function(sec, secRealIdx){return {sec:sec,realIdx:secRealIdx}}).filter(function(o){return o.sec.category==='production'}).map(function(o, si){
+      var sec = o.sec;
+      var secRealIdx = o.realIdx;
       var bodyText = (sec.html||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+      var isEditingThis = editingSectionIdx === secRealIdx;
       return e(Section,{key:'prod_'+si,rid:recipe.id,idx:'prod'+si,title:sec.title,category:sec.category,defaultOpen:true,copyText:bodyText},
-        e('div',{dangerouslySetInnerHTML:{__html:sec.html||''}})
+        e('div',{style:{display:'flex',gap:'6px',marginBottom:'8px',flexWrap:'wrap'}},
+          e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'2px 8px'},onClick:function(){renameSection(secRealIdx)}},'\u270F Rename'),
+          e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'2px 8px'},onClick:function(){setEditingSectionIdx(isEditingThis?null:secRealIdx)}},isEditingThis?'\u2715 Cancel Edit':'\u270F Edit Content'),
+          e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'2px 8px'},onClick:function(){moveSectionFromProduction(secRealIdx)}},'\u2193 Move to Details'),
+          e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'2px 8px',color:'#e74c3c'},onClick:function(){deleteSection(secRealIdx)}},'\u2715 Delete')
+        ),
+        isEditingThis ?
+          e('textarea',{className:'form-input',value:sec.html||'',onChange:function(ev){editSectionContent(secRealIdx,ev.target.value)},style:{width:'100%',minHeight:'120px',fontSize:'12px',fontFamily:'monospace'}}) :
+          e('div',{dangerouslySetInnerHTML:{__html:sec.html||''}})
       );
     }),
 
@@ -1582,15 +1798,28 @@ function RecipeDetail(props){
 
     // Everything else in one "More Details" dropdown
     (function(){
-      var otherSecs = recipe.sections.filter(function(sec){
-        return sec.category !== 'phase' && sec.category !== 'scent_profiles' && sec.category !== 'production' && sec.category !== 'qc';
+      var otherSecs = recipe.sections.map(function(sec,idx){return {sec:sec,realIdx:idx}}).filter(function(o){
+        return o.sec.category !== 'phase' && o.sec.category !== 'scent_profiles' && o.sec.category !== 'production' && o.sec.category !== 'qc';
       });
       if(otherSecs.length === 0) return null;
       return e(Section,{rid:recipe.id,idx:'more_details',title:'More Details ('+otherSecs.length+' sections)',category:'info',defaultOpen:false},
-        otherSecs.map(function(sec, si){
+        otherSecs.map(function(o, si){
+          var sec = o.sec;
+          var secRealIdx = o.realIdx;
+          var isEditingThis = editingSectionIdx === secRealIdx;
           return e('div',{key:'other_'+si,style:{marginBottom:'16px',paddingBottom:'12px',borderBottom:si<otherSecs.length-1?'1px solid var(--border-light)':'none'}},
-            e('div',{style:{fontSize:'13px',fontWeight:600,marginBottom:'6px',color:'var(--text)'}},sec.title),
-            e('div',{dangerouslySetInnerHTML:{__html:sec.html||''},style:{fontSize:'13px'}})
+            e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}},
+              e('div',{style:{fontSize:'13px',fontWeight:600,color:'var(--text)'}},sec.title),
+              e('div',{style:{display:'flex',gap:'4px',flexWrap:'wrap'}},
+                e('button',{className:'tool-btn',style:{fontSize:'10px',padding:'2px 6px'},onClick:function(){renameSection(secRealIdx)}},'\u270F Rename'),
+                e('button',{className:'tool-btn',style:{fontSize:'10px',padding:'2px 6px'},onClick:function(){setEditingSectionIdx(isEditingThis?null:secRealIdx)}},isEditingThis?'\u2715 Cancel':'\u270F Edit'),
+                e('button',{className:'tool-btn',style:{fontSize:'10px',padding:'2px 6px'},onClick:function(){moveSectionToProduction(secRealIdx)}},'\u2191 To Production'),
+                e('button',{className:'tool-btn',style:{fontSize:'10px',padding:'2px 6px',color:'#e74c3c'},onClick:function(){deleteSection(secRealIdx)}},'\u2715')
+              )
+            ),
+            isEditingThis ?
+              e('textarea',{className:'form-input',value:sec.html||'',onChange:function(ev){editSectionContent(secRealIdx,ev.target.value)},style:{width:'100%',minHeight:'100px',fontSize:'12px',fontFamily:'monospace'}}) :
+              e('div',{dangerouslySetInnerHTML:{__html:sec.html||''},style:{fontSize:'13px'}})
           );
         })
       );
@@ -1775,7 +2004,7 @@ function IngredientsPage(props){
             return e('div',{key:j,style:{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid var(--border-light)'}},
               e('span',{style:{cursor:'pointer',color:'var(--gold)'},onClick:function(ev){
                 ev.stopPropagation();
-                var rec = RECIPES.concat(ls('userRecipes',[])).find(function(r){return r.id===u.recipeId});
+                var rec = getAllRecipes().find(function(r){return r.id===u.recipeId});
                 if(rec) props.onSelectRecipe(rec);
               }},u.recipe.length > 40 ? u.recipe.substring(0,37)+'...' : u.recipe),
               e('span',null,u.percent+'% ('+u.grams+'g)')
@@ -1837,17 +2066,80 @@ function BatchesPage(props){
     showToast('Batch removed');
   }
 
+  function exportCSV(){
+    var rows = [['Batch Number','Recipe','Date','Scent','Units','Status','Author','Expiry','Notes']];
+    logs.forEach(function(b){
+      rows.push([
+        b.batchNumber||'',
+        b.recipeName||'',
+        b.date||'',
+        b.scent||'',
+        String(b.unitsProduced||0),
+        b.status||'completed',
+        b.author||'',
+        b.expiryDate||'',
+        (b.notes||'').replace(/"/g,'""')
+      ]);
+    });
+    var csv = rows.map(function(r){return r.map(function(c){return '"'+c+'"'}).join(',')}).join('\n');
+    var blob = new Blob([csv],{type:'text/csv'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'gecko_batches_'+today()+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('CSV exported!');
+  }
+
+  function exportBarcodePDF(){
+    // Generate a printable HTML page with all barcodes
+    var html = '<!DOCTYPE html><html><head><title>Gecko Batch Barcodes</title><style>';
+    html += 'body{font-family:Arial,sans-serif;margin:20px}';
+    html += '.label{display:inline-block;width:220px;padding:12px;margin:8px;border:1px solid #ddd;border-radius:6px;text-align:center;page-break-inside:avoid}';
+    html += '.label img{width:200px;height:50px}';
+    html += '.batch-id{font-size:11px;font-weight:700;margin-top:4px;font-family:monospace}';
+    html += '.batch-info{font-size:9px;color:#666;margin-top:2px}';
+    html += '@media print{.no-print{display:none!important}.label{border:1px solid #999}}';
+    html += '</style></head><body>';
+    html += '<h2 style="margin-bottom:4px">Gecko Creationz — Batch Barcodes</h2>';
+    html += '<p style="font-size:12px;color:#666;margin-top:0">Generated '+today()+' — '+logs.length+' batches</p>';
+    html += '<button class="no-print" onclick="window.print()" style="margin-bottom:12px;padding:8px 16px;font-size:14px;cursor:pointer">Print Labels</button>';
+    html += '<div>';
+    logs.forEach(function(b){
+      var bc = b.barcode || genBarcodeSVG(b.batchNumber, 200, 50);
+      html += '<div class="label">';
+      html += '<img src="'+bc+'"/>';
+      html += '<div class="batch-id">'+b.batchNumber+'</div>';
+      html += '<div class="batch-info">'+(b.recipeName||'')+(b.scent?' — '+b.scent:'')+'</div>';
+      html += '<div class="batch-info">'+fmtDate(b.date)+(b.expiryDate?' | Exp: '+fmtDate(b.expiryDate):'')+'</div>';
+      html += '</div>';
+    });
+    html += '</div></body></html>';
+    var blob = new Blob([html],{type:'text/html'});
+    var url = URL.createObjectURL(blob);
+    var win = window.open(url,'_blank');
+    if(!win) showToast('Pop-up blocked — allow pop-ups for this site');
+    else showToast('Barcode labels opened!');
+  }
+
   var filtered = logs.filter(function(b){
     return !search || (b.recipeName||'').toLowerCase().indexOf(search.toLowerCase()) >= 0 || (b.batchNumber||'').toLowerCase().indexOf(search.toLowerCase()) >= 0;
   }).reverse();
 
   return e('div',{className:'container'},
-    e('div',{style:{fontSize:'16px',fontWeight:600,marginBottom:'10px'}},'Batch History'),
+    e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}},
+      e('div',{style:{fontSize:'16px',fontWeight:600}},'Batch History'),
+      logs.length > 0 ? e('div',{style:{display:'flex',gap:'6px'}},
+        e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'4px 10px'},onClick:exportCSV},'\uD83D\uDCCB CSV'),
+        e('button',{className:'tool-btn',style:{fontSize:'11px',padding:'4px 10px'},onClick:exportBarcodePDF},'\uD83C\uDFF7 Barcodes')
+      ) : null
+    ),
     e('div',{className:'search-bar'},
       e('input',{className:'search-input',placeholder:'Search batches...',value:search,onChange:function(ev){setSearch(ev.target.value)}})
     ),
     filtered.length === 0 ? e('div',{className:'empty-state'},e('div',{className:'icon'},'\uD83D\uDCE6'),e('p',null,'No batches logged yet')) :
     filtered.map(function(b,i){
+      var barcodeData = b.barcode || genBarcodeSVG(b.batchNumber, 220, 50);
       return e('div',{key:b.id||i,className:'batch-card'},
         e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
           e('span',{className:'batch-number'},b.batchNumber),
@@ -1864,7 +2156,12 @@ function BatchesPage(props){
           b.author?' \u2022 '+b.author:'',
           b.expiryDate?' \u2022 Exp: '+fmtDate(b.expiryDate):''
         ),
-        b.notes ? e('div',{style:{fontSize:'12px',color:'var(--text-light)',marginTop:'4px'}},b.notes) : null
+        b.notes ? e('div',{style:{fontSize:'12px',color:'var(--text-light)',marginTop:'4px'}},b.notes) : null,
+        // Barcode
+        e('div',{style:{marginTop:'8px',textAlign:'center',padding:'8px',background:'#fff',borderRadius:'6px'}},
+          e('img',{src:barcodeData,style:{width:'200px',height:'45px'},alt:'Barcode: '+b.batchNumber}),
+          e('div',{style:{fontSize:'10px',fontFamily:'monospace',color:'#333',marginTop:'2px'}},b.batchNumber)
+        )
       );
     })
   );
@@ -1975,6 +2272,7 @@ function CalendarPage(props){
               lsSet('scheduledBatches',sc);
               // Also log as batch
               var batch = {id:uid(),batchNumber:genBatchNum(s.recipeName),recipeId:s.recipeId,recipeName:s.recipeName,scent:s.scent||'',batchSizeGrams:(s.units||0)*(s.fillWeight||50),unitsProduced:s.units||0,containerSize:s.fillWeight||50,date:today(),qcResults:[],notes:'From scheduled batch',totalCost:0,status:'completed',author:ls('activeProfile','Heath'),expiryDate:''};
+              batch.barcode = genBarcodeSVG(batch.batchNumber, 220, 50);
               var logs = ls('batchLogs',[]);logs.push(batch);lsSet('batchLogs',logs);
               showToast('Batch completed & logged');
               // Force re-render
@@ -1995,7 +2293,7 @@ function CalendarPage(props){
 
 // ── Schedule Batch Form ──
 function ScheduleBatchForm(props){
-  var allRecipes = RECIPES.concat(ls('userRecipes',[]));
+  var allRecipes = getAllRecipes();
   var rs = useState(allRecipes[0]?allRecipes[0].id:'');
   var recId = rs[0], setRecId = rs[1];
   var us = useState(10);
@@ -2102,12 +2400,27 @@ function AddRecipePage(props){
         e('div',{className:'import-preview'},
           e('div',{className:'import-field'},e('span',{className:'label'},'Name'),e('span',{className:'value'},previewData.name||'(not detected)')),
           e('div',{className:'import-field'},e('span',{className:'label'},'Phases'),e('span',{className:'value '+(previewData.phases.length>0?'import-success':'import-warning')},previewData.phases.length+' detected')),
-          e('div',{className:'import-field'},e('span',{className:'label'},'Ingredients'),e('span',{className:'value'},previewData.totalIngredients+' total')),
+          e('div',{className:'import-field'},e('span',{className:'label'},'Ingredients'),e('span',{className:'value '+(previewData.totalIngredients>0?'import-success':'import-warning')},previewData.totalIngredients+' total')),
           e('div',{className:'import-field'},e('span',{className:'label'},'Scent Profiles'),e('span',{className:'value'},previewData.scentProfiles.length+' detected')),
           e('div',{className:'import-field'},e('span',{className:'label'},'QC Checks'),e('span',{className:'value'},previewData.qcItems.length+' detected')),
           e('div',{className:'import-field'},e('span',{className:'label'},'Sections'),e('span',{className:'value'},previewData.sections.length+' detected')),
-          e('div',{className:'import-field'},e('span',{className:'label'},'Category'),e('span',{className:'value'},previewData.category))
+          e('div',{className:'import-field'},e('span',{className:'label'},'Category'),e('span',{className:'value'},previewData.category)),
+          previewData.productLine ? e('div',{className:'import-field'},e('span',{className:'label'},'Product Line'),e('span',{className:'value'},previewData.productLine)) : null
         ),
+        // Show ingredient breakdown per phase
+        previewData.phases.length > 0 ? e('div',{style:{marginTop:'12px',padding:'10px',background:'var(--bg-elevated)',borderRadius:'8px',fontSize:'12px'}},
+          e('div',{style:{fontWeight:600,marginBottom:'6px'}},'Ingredient Preview'),
+          previewData.phases.map(function(p,pi){
+            return e('div',{key:pi,style:{marginBottom:'8px'}},
+              e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'2px'}},'Phase '+p.letter+(p.name?' — '+p.name:'')+' ('+p.totalGrams.toFixed(1)+'g)'),
+              p.ingredients.map(function(ing,ii){
+                return e('div',{key:ii,style:{paddingLeft:'12px',color:'var(--text-light)'}},
+                  ing.number+'. '+ing.name+' — '+ing.grams+'g ('+ing.percent+'%)'
+                );
+              })
+            );
+          })
+        ) : null,
         e('button',{className:'tool-btn primary',style:{width:'100%',justifyContent:'center',padding:'12px',marginTop:'10px'},onClick:confirmImport},'Add Recipe to App')
       ) : null
     ) : e('div',null,
@@ -2363,6 +2676,78 @@ function SettingsPage(props){
 
 
 
+    // Live Feed Setup Instructions
+    (function(){
+      var _lf = useState(false);
+      var lfOpen = _lf[0], setLfOpen = _lf[1];
+      return e('div',{className:'card'},
+        e('div',{className:'card-body',style:{padding:'16px'}},
+          e('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'},onClick:function(){setLfOpen(!lfOpen)}},
+            e('div',{style:{fontSize:'14px',fontWeight:600}},'How to Get the Live Feed Working'),
+            e('span',{style:{fontSize:'18px',color:'var(--text-muted)',transition:'transform 0.2s',transform:lfOpen?'rotate(180deg)':'rotate(0)'}},'\u25BC')
+          ),
+          lfOpen ? e('div',{style:{marginTop:'12px',fontSize:'13px',lineHeight:'1.7',color:'var(--text-light)'}},
+            e('p',{style:{marginBottom:'10px',color:'var(--text-muted)',fontStyle:'italic'}},'The live feed lets you and Kendal (or any helper) see each other\'s changes in real time. It takes about 5 minutes to set up.'),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'What you need'),
+            e('p',{style:{marginBottom:'10px'}},'A free GitHub account. That\'s it. GitHub stores your shared data in a private file called a "Gist." The app checks for updates every 15 seconds.'),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'Step 1 — Create a GitHub account (skip if you have one)'),
+            e('ol',{style:{paddingLeft:'20px',margin:'0 0 10px'}},
+              e('li',null,'Go to github.com and click "Sign up."'),
+              e('li',null,'Enter your email, create a password, and pick a username.'),
+              e('li',null,'Verify your email. Done.')
+            ),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'Step 2 — Create a Personal Access Token (PAT)'),
+            e('ol',{style:{paddingLeft:'20px',margin:'0 0 10px'}},
+              e('li',null,'Log into GitHub.'),
+              e('li',null,'Click your profile picture (top right) then "Settings."'),
+              e('li',null,'Scroll all the way down in the left sidebar. Click "Developer settings."'),
+              e('li',null,'Click "Personal access tokens" then "Tokens (classic)."'),
+              e('li',null,'Click "Generate new token" then "Generate new token (classic)."'),
+              e('li',null,'Give it a name like "Gecko App."'),
+              e('li',null,'Under "Select scopes," tick the box next to "gist." That\'s the only one you need.'),
+              e('li',null,'Click "Generate token" at the bottom.'),
+              e('li',null,'Copy the token immediately. It starts with "ghp_". You won\'t see it again.')
+            ),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'Step 3 — Connect this app'),
+            e('ol',{style:{paddingLeft:'20px',margin:'0 0 10px'}},
+              e('li',null,'In the Cloud Sync card above, paste your token into the box.'),
+              e('li',null,'Click "Create & Connect." The app will create a shared workspace automatically.'),
+              e('li',null,'You should see a green dot and "Sync active" within a few seconds.')
+            ),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'Step 4 — Get a second person connected'),
+            e('ol',{style:{paddingLeft:'20px',margin:'0 0 10px'}},
+              e('li',null,'In the Cloud Sync card, click "Copy" next to the Gist ID. This copies the token and Gist ID.'),
+              e('li',null,'Send those details to your helper (text, email, whatever works).'),
+              e('li',null,'They open the Gecko app on their phone or computer.'),
+              e('li',null,'They go to Settings and click "Join Workspace."'),
+              e('li',null,'They paste the token and Gist ID, then click "Join Workspace."'),
+              e('li',null,'Both devices should now show each other as online.')
+            ),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'How it works day-to-day'),
+            e('ul',{style:{paddingLeft:'20px',margin:'0 0 10px'}},
+              e('li',null,'Any change either of you makes (editing recipes, logging batches, adding notes) syncs automatically.'),
+              e('li',null,'The app checks for new changes every 15 seconds.'),
+              e('li',null,'You can see who\'s online and what they did recently in the activity feed.'),
+              e('li',null,'If you lose internet, changes save locally and sync when you reconnect.')
+            ),
+
+            e('div',{style:{fontWeight:600,color:'var(--gold)',marginBottom:'6px',marginTop:'12px'}},'Troubleshooting'),
+            e('ul',{style:{paddingLeft:'20px',margin:'0'}},
+              e('li',null,'Not syncing? Hit "Sync Now" in the Cloud Sync card.'),
+              e('li',null,'Token expired? Create a new one (Step 2) and reconnect.'),
+              e('li',null,'Lost your data? Use "Export Backup" regularly. The JSON file has everything.')
+            )
+          ) : null
+        )
+      );
+    })(),
+
     e('div',{className:'card'},
       e('div',{className:'card-body',style:{padding:'16px'}},
         e('div',{style:{fontSize:'14px',fontWeight:600,marginBottom:'10px'}},'Gift Bundles'),
@@ -2374,7 +2759,7 @@ function SettingsPage(props){
 
 // ── Label Export Page ──
 function LabelExportPage(props){
-  var allRecipes = RECIPES.concat(ls('userRecipes',[]));
+  var allRecipes = getAllRecipes();
   var rs = useState(allRecipes[0]?allRecipes[0].id:'');
   var recId = rs[0], setRecId = rs[1];
   var selectedRec = allRecipes.find(function(r){return r.id===recId});
@@ -2446,7 +2831,7 @@ function BundlesPage(props){
   var editing = useState(null);
   var editIdx = editing[0], setEditIdx = editing[1];
 
-  var allRecipes = RECIPES.concat(ls('userRecipes',[]));
+  var allRecipes = getAllRecipes();
 
   function addBundle(){
     var b = {id:uid(),name:'New Bundle',items:[],packagingCost:5,suggestedRrp:0,notes:''};
@@ -2863,6 +3248,26 @@ function App(){
 
   function selectRecipe(r){setSelectedRecipe(r);setPage('detail');window.scrollTo(0,0)}
 
+  function deleteRecipe(recipe){
+    if(!confirm('Delete "'+recipe.name+'"? This cannot be undone.')) return;
+    var isUserRecipe = ls('userRecipes',[]).some(function(r){return r.id===recipe.id});
+    if(isUserRecipe){
+      var ur = ls('userRecipes',[]).filter(function(r){return r.id!==recipe.id});
+      lsSet('userRecipes',ur);
+    } else {
+      var del = ls('deletedRecipes',[]);
+      if(del.indexOf(recipe.id)===-1) del.push(recipe.id);
+      lsSet('deletedRecipes',del);
+    }
+    // Clean up related data
+    localStorage.removeItem('recipeVersions_'+recipe.id);
+    localStorage.removeItem('recipeEdits_'+recipe.id);
+    localStorage.removeItem('notes_'+recipe.id);
+    showToast('"'+recipe.name+'" deleted');
+    logActivity('deleted recipe',recipe.name);
+    nav('recipes');
+  }
+
   function startProduction(r){setProdRecipe(r);setPage('production');window.scrollTo(0,0)}
 
   function logBatch(batch){
@@ -2876,7 +3281,7 @@ function App(){
     var units = prompt('Units produced:','10');
     var scent = '';
     if(batch.recipeName){
-      var rec = RECIPES.concat(ls('userRecipes',[])).find(function(r){return r.id===batch.recipeId});
+      var rec = getAllRecipes().find(function(r){return r.id===batch.recipeId});
       if(rec && rec.scentProfiles && rec.scentProfiles.length > 0){
         scent = prompt('Scent variant:',rec.scentProfiles[0].name)||'';
       }
@@ -2884,6 +3289,7 @@ function App(){
     batch.unitsProduced = parseInt(units) || 0;
     batch.scent = scent;
     batch.expiryDate = addMonths(today(), parseShelfMonths(selectedRecipe?selectedRecipe.shelfLife:'12 months'));
+    batch.barcode = genBarcodeSVG(batch.batchNumber, 220, 50);
 
     var logs = ls('batchLogs',[]);
     logs.push(batch);
@@ -2904,6 +3310,7 @@ function App(){
   if(page === 'production' && prodRecipe){
     content = e(ProductionWalkthrough,{recipe:prodRecipe,onBack:function(){setPage('detail');setProdRecipe(null);window.scrollTo(0,0)},onLogBatch:function(r,batchNotes){
       var batch = {id:uid(),batchNumber:genBatchNum(r.name),recipeId:r.id,recipeName:r.name,recipeVersion:r.version||'V1.0',scent:'',batchSizeGrams:0,unitsProduced:0,containerSize:0,date:today(),qcResults:[],notes:batchNotes||'',_notesHandled:true,totalCost:0,status:'completed',author:ls('activeProfile','Heath'),expiryDate:addMonths(today(),parseShelfMonths(r.shelfLife))};
+      batch.barcode = genBarcodeSVG(batch.batchNumber, 220, 50);
       // Also save to recipe-level notes so they persist
       if(batchNotes && batchNotes.trim()){
         var nKey = 'notes_'+r.id;
@@ -2915,7 +3322,7 @@ function App(){
       setPage('detail');setProdRecipe(null);
     }});
   } else if(page === 'detail' && selectedRecipe){
-    content = e(RecipeDetail,{recipe:selectedRecipe,onBack:function(){nav('recipes')},onLogBatch:logBatch,onUpdateRecipe:function(){},onStartProduction:startProduction});
+    content = e(RecipeDetail,{recipe:selectedRecipe,onBack:function(){nav('recipes')},onLogBatch:logBatch,onUpdateRecipe:function(){},onStartProduction:startProduction,onDelete:deleteRecipe});
   } else if(page === 'recipes'){
     content = e(RecipeList,{onSelect:selectRecipe,nav:nav});
   } else if(page === 'ingredients'){
