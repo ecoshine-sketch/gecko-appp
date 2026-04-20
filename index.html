@@ -823,6 +823,20 @@ function inlineFmt(text){
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" style="color:var(--gold)">$1</a>');
 }
 
+// Auto-convert section HTML that still has raw markdown (e.g. imported recipes with pipe tables)
+function ensureHtml(html){
+  if(!html) return '';
+  // If it has markdown table pattern (line starting with |) but no <table tag, convert it
+  if(html.match(/^\|/m) && html.indexOf('<table') === -1){
+    return mdToHtml(html);
+  }
+  // Also catch blockquotes that weren't converted (line starting with >)
+  if(html.match(/^>/m) && html.indexOf('<blockquote') === -1){
+    return mdToHtml(html);
+  }
+  return html;
+}
+
 // Convert markdown table lines to an HTML table
 function parseTableToHtml(tableLines){
   if(tableLines.length < 2) return tableLines.join('<br>');
@@ -1358,7 +1372,29 @@ function BatchCalc(props){
           e('div',{style:{fontSize:'12px',fontWeight:600,margin:'8px 0 4px',color:'var(--text-light)'}},phase.name||('Phase '+(phase.letter||pi+1))),
           e(IngTable,{ingredients:phase.ingredients,sf:sf,overage:overage,showTotal:true})
         );
-      })
+      }),
+      // Scaled scent profiles
+      recipe.scentProfiles && recipe.scentProfiles.length > 0 ? e('div',{style:{marginTop:'12px',paddingTop:'10px',borderTop:'1px solid var(--border-light)'}},
+        e('div',{style:{fontSize:'12px',fontWeight:600,margin:'0 0 6px',color:'var(--gold)'}},'Scent Profiles (scaled)'),
+        recipe.scentProfiles.filter(function(p){return !p.isFragranceFree && p.oils && p.oils.length > 0}).map(function(profile,pi){
+          var scaledOils = profile.oils.map(function(oil){
+            return {id:oil.id||uid(),name:oil.name,grams:oil.grams*sf,percent:0};
+          });
+          var scaledTotal = scaledOils.reduce(function(s,o){return s+o.grams},0);
+          return e('div',{key:'scent_'+pi,style:{marginBottom:'8px'}},
+            e('div',{style:{fontSize:'11px',fontWeight:600,color:'var(--text-light)',marginBottom:'4px'}},profile.name+(profile.subtitle?' — '+profile.subtitle:'')),
+            e('table',{className:'ing-table'},
+              e('thead',null,e('tr',null,e('th',null,'Essential Oil'),e('th',{className:'num'},'Grams'))),
+              e('tbody',null,
+                scaledOils.map(function(oil,i){
+                  return e('tr',{key:i},e('td',null,oil.name),e('td',{className:'num'},fmt(oil.grams)));
+                }),
+                e('tr',{className:'phase-total'},e('td',null,'Total'),e('td',{className:'num'},fmt(scaledTotal)))
+              )
+            )
+          );
+        })
+      ) : null
     ) : null
   );
 }
@@ -1891,14 +1927,6 @@ function RecipeDetail(props){
       '\u26A0 Total grams = '+fmt(grandTotalG)+'g (master batch is '+(recipe.batchSize||100)+'g)'
     ) : null,
 
-    // Scent selector
-    recipe.scentProfiles && recipe.scentProfiles.length > 0 ? e('div',{className:'section'},
-      e('div',{className:'section-header'},
-        e('span',{className:'section-title'},e('span',{className:'cat-badge cat-formulation'},'Formula'),'Scent Profiles')
-      ),
-      e('div',{className:'section-body'},e(ScentSelector,{profiles:recipe.scentProfiles}))
-    ) : null,
-
     // Phase sections
     phases.map(function(phase, pi){
       var pTitle = (phase.letter ? 'Phase '+phase.letter : 'Phase '+(pi+1)) + (phase.name ? ' \u2014 '+phase.name : '');
@@ -1936,9 +1964,17 @@ function RecipeDetail(props){
         ),
         isEditingThis ?
           e('textarea',{className:'form-input',value:sec.html||'',onChange:function(ev){editSectionContent(secRealIdx,ev.target.value)},style:{width:'100%',minHeight:'120px',fontSize:'12px',fontFamily:'monospace'}}) :
-          e('div',{dangerouslySetInnerHTML:{__html:sec.html||''}})
+          e('div',{dangerouslySetInnerHTML:{__html:ensureHtml(sec.html)}})
       );
     }),
+
+    // Scent profiles — shown here in production flow so they're visible during manufacturing
+    recipe.scentProfiles && recipe.scentProfiles.length > 0 ? e('div',{className:'section'},
+      e('div',{className:'section-header'},
+        e('span',{className:'section-title'},e('span',{className:'cat-badge cat-formulation'},'Formula'),'Scent Profiles')
+      ),
+      e('div',{className:'section-body'},e(ScentSelector,{profiles:recipe.scentProfiles}))
+    ) : null,
 
     // PRODUCTION NOTES
     e(ProductionNotes,{recipeId:recipe.id}),
@@ -1974,7 +2010,7 @@ function RecipeDetail(props){
             ),
             isEditingThis ?
               e('textarea',{className:'form-input',value:sec.html||'',onChange:function(ev){editSectionContent(secRealIdx,ev.target.value)},style:{width:'100%',minHeight:'100px',fontSize:'12px',fontFamily:'monospace'}}) :
-              e('div',{dangerouslySetInnerHTML:{__html:sec.html||''},style:{fontSize:'13px'}})
+              e('div',{dangerouslySetInnerHTML:{__html:ensureHtml(sec.html)},style:{fontSize:'13px'}})
           );
         })
       );
