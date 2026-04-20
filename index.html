@@ -411,34 +411,55 @@ function applySyncData(data){
 
 function cloudPush(){
   var config=ls('syncConfig',null);
-  if(!config||!config.pat)return Promise.resolve();
+  if(!config||!config.pat){console.warn('cloudPush: no config/pat');return Promise.resolve()}
   var data=getSyncableData();
   var body={files:{'gecko_sync.json':{content:JSON.stringify(data)}}};
   var url,method;
   if(config.gistId){url='https://api.github.com/gists/'+config.gistId;method='PATCH'}
   else{url='https://api.github.com/gists';method='POST';body.description='Gecko Creationz App Sync';body.public=false}
+  console.log('cloudPush:',method,url,'keys:',Object.keys(data).length);
   return fetch(url,{method:method,headers:{'Authorization':'token '+config.pat,'Content-Type':'application/json','Accept':'application/vnd.github.v3+json'},body:JSON.stringify(body)})
-  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(result){
+  .then(function(r){
+    if(!r.ok){return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t)})}
+    return r.json();
+  }).then(function(result){
     if(result.id){
       if(!config.gistId){config.gistId=result.id;try{localStorage.setItem('gecko_syncConfig',JSON.stringify(config))}catch(e){}}
       try{localStorage.setItem('gecko_lastSyncTime',JSON.stringify(new Date().toISOString()))}catch(e){}
       try{localStorage.setItem('gecko_syncStatus',JSON.stringify('ok'))}catch(e){}
+      console.log('cloudPush: SUCCESS, gist:',result.id);
     }
     return result;
   }).catch(function(err){
-    console.error('Sync push failed:',err);
-    try{localStorage.setItem('gecko_syncStatus',JSON.stringify('error'))}catch(e){}
+    console.error('cloudPush FAILED:',err.message||err);
+    try{localStorage.setItem('gecko_syncStatus',JSON.stringify('error: '+err.message))}catch(e){}
+    if(typeof showToast==='function')showToast('Sync push failed: '+err.message);
   });
 }
 
 function cloudPull(){
   var config=ls('syncConfig',null);
-  if(!config||!config.pat||!config.gistId)return Promise.resolve(null);
+  if(!config||!config.pat||!config.gistId){console.warn('cloudPull: no config/pat/gistId');return Promise.resolve(null)}
+  console.log('cloudPull: fetching gist',config.gistId);
   return fetch('https://api.github.com/gists/'+config.gistId,{headers:{'Authorization':'token '+config.pat,'Accept':'application/vnd.github.v3+json'}})
-  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(result){
-    if(result.files&&result.files['gecko_sync.json']){return JSON.parse(result.files['gecko_sync.json'].content)}
+  .then(function(r){
+    if(!r.ok){return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t)})}
+    return r.json();
+  }).then(function(result){
+    var fileNames=Object.keys(result.files||{});
+    console.log('cloudPull: gist files:',fileNames.join(', '));
+    if(result.files&&result.files['gecko_sync.json']){
+      var parsed=JSON.parse(result.files['gecko_sync.json'].content);
+      console.log('cloudPull: got sync data, keys:',Object.keys(parsed).length,'syncTime:',parsed._syncTime);
+      return parsed;
+    }
+    console.warn('cloudPull: no gecko_sync.json found in gist, files:',fileNames);
     return null;
-  }).catch(function(err){console.error('Sync pull failed:',err);return null});
+  }).catch(function(err){
+    console.error('cloudPull FAILED:',err.message||err);
+    if(typeof showToast==='function')showToast('Sync pull failed: '+err.message);
+    return null;
+  });
 }
 
 function findExistingGist(pat){
@@ -446,7 +467,7 @@ function findExistingGist(pat){
   .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(gists){
     if(!Array.isArray(gists))return null;
     for(var i=0;i<gists.length;i++){
-      if(gists[i].description==='Gecko Creationz App Sync'&&gists[i].files&&gists[i].files['gecko_sync.json'])return gists[i].id;
+      if(gists[i].files&&gists[i].files['gecko_sync.json'])return gists[i].id;
     }
     return null;
   });
@@ -465,18 +486,30 @@ function doFullSync(skipReload){
     if(remoteData){
       var remoteTime=new Date(remoteData._syncTime||0).getTime();
       var localTime=new Date(ls('lastSyncTime','2000-01-01')).getTime();
+      console.log('doFullSync: remote:',new Date(remoteTime).toISOString(),'local:',new Date(localTime).toISOString(),'remote newer:',remoteTime>localTime);
       if(remoteTime>localTime){
         applySyncData(remoteData);
         try{localStorage.setItem('gecko_lastSyncTime',JSON.stringify(new Date().toISOString()))}catch(e){}
-        if(!skipReload){
-          sessionStorage.setItem('gecko_justSynced','1');
-          window.location.reload();
-          return 'reloading';
-        }
+        // Always push back after applying remote data
+        return cloudPush().then(function(){
+          if(!skipReload){
+            sessionStorage.setItem('gecko_justSynced','1');
+            window.location.reload();
+            return 'reloading';
+          }
+          window.dispatchEvent(new CustomEvent('gecko-sync-update'));
+          return 'merged';
+        });
       }
+    } else {
+      console.log('doFullSync: no remote data, pushing local');
     }
     return cloudPush().then(function(){return 'ok'});
-  }).catch(function(err){console.error('Full sync failed:',err);return 'error'});
+  }).catch(function(err){
+    console.error('Full sync failed:',err);
+    if(typeof showToast==='function')showToast('Sync failed: '+(err.message||err));
+    return 'error';
+  });
 }
 
 // ── Multi-User Collaboration ──
@@ -2486,11 +2519,22 @@ function SettingsPage(props){
             ):null,
 
             // Sync status line
-            e('div',{style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px'}},
-              e('span',{style:{width:'8px',height:'8px',borderRadius:'50%',background:'#4CAF50',display:'inline-block'}}),
-              e('span',{style:{fontSize:'12px',color:'var(--green)',fontWeight:500}},'Sync active — polling every 15s'),
-              lastSync?e('span',{style:{fontSize:'11px',color:'var(--text-muted)'}},'Last: '+fmtDate(lastSync)):null
-            ),
+            (function(){
+              var syncSt=ls('syncStatus','unknown');
+              var isErr=syncSt&&syncSt.indexOf('error')===0;
+              var batches=ls('batchLogs',[]);
+              return e('div',{style:{marginBottom:'10px'}},
+                e('div',{style:{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'}},
+                  e('span',{style:{width:'8px',height:'8px',borderRadius:'50%',background:isErr?'#f44336':'#4CAF50',display:'inline-block'}}),
+                  e('span',{style:{fontSize:'12px',color:isErr?'var(--red)':'var(--green)',fontWeight:500}},isErr?'Sync error':'Sync active — polling every 15s'),
+                  lastSync?e('span',{style:{fontSize:'11px',color:'var(--text-muted)'}},'Last: '+fmtDate(lastSync)):null
+                ),
+                e('div',{style:{fontSize:'11px',color:'var(--text-muted)',paddingLeft:'16px'}},
+                  batches.length+' batches stored · Status: '+syncSt+(syncCfg.gistId?' · Gist: '+syncCfg.gistId.substring(0,8)+'...':'')
+                ),
+                isErr?e('div',{style:{fontSize:'11px',color:'var(--red)',paddingLeft:'16px',marginTop:'2px'}},syncSt):null
+              );
+            })(),
 
             // Share code section
             e('div',{style:{background:'var(--bg-dark)',borderRadius:'8px',padding:'10px',marginBottom:'10px'}},
@@ -2532,10 +2576,29 @@ function SettingsPage(props){
                 showToast('Syncing...');
                 updatePresence();
                 doFullSync(true).then(function(s){
-                  showToast('Sync complete!');
+                  var status=ls('syncStatus','unknown');
+                  if(s==='error'||status.indexOf('error')===0){
+                    showToast('Sync failed! Check console for details. Status: '+status);
+                  } else {
+                    var batches=ls('batchLogs',[]);
+                    showToast('Sync complete! ('+s+') — '+batches.length+' batches');
+                  }
                   window.dispatchEvent(new CustomEvent('gecko-sync-update'));
                 });
               }},'↻ Sync Now'),
+              e('button',{className:'tool-btn',onClick:function(){
+                showToast('Testing connection...');
+                cloudPull().then(function(data){
+                  if(data){
+                    var keys=Object.keys(data).filter(function(k){return k.charAt(0)!=='_'});
+                    var bCount=(data.batchLogs||[]).length;
+                    showToast('Connected! Remote has '+keys.length+' keys, '+bCount+' batches. syncTime: '+(data._syncTime||'none'));
+                  } else {
+                    showToast('Connected to Gist but no gecko_sync.json found — try pushing first');
+                    cloudPush().then(function(){showToast('Pushed! Try test again.')});
+                  }
+                });
+              }},'Test'),
               e('button',{className:'tool-btn',style:{color:'var(--red)'},onClick:function(){
                 if(confirm('Disconnect sync? Local data stays but sync stops.')){
                   stopCollabPolling();
