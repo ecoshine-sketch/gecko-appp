@@ -1,0 +1,18 @@
+# Cloudflare Pages security headers for the Gecko Creationz app.
+# Cloudflare reads this file at the root of the deploy and applies the
+# headers to every response. Reference:
+# https://developers.cloudflare.com/pages/configuration/headers/
+#
+# Rules below are intentionally conservative — they harden against common
+# attacks (clickjacking, MIME sniffing, mixed content) without breaking
+# the existing inline-script architecture. If we add a strict
+# Content-Security-Policy later, we'll need to refactor inline scripts
+# first.
+
+/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=()
+  Cross-Origin-Opener-Policy: same-origin
